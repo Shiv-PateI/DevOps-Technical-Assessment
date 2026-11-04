@@ -129,30 +129,15 @@ Describe 'Get-IdentityDecision' {
             $decision.Changes['surname'].To | Should -Be 'Smith'
         }
 
-        It 'creates a disabled identity when the start date is in the future' {
+        It 'creates an enabled identity before the start date when the start date is in the future' {
             $worker   = New-TestWorker -Set @{ startDate = '2026-11-18' }
             $decision = Get-IdentityDecision -Worker $worker -Identities @() -Today $Today
 
             $decision.Action | Should -Be 'Create'
-            $decision.Changes['accountEnabled'].To | Should -BeFalse
-            $decision.Reason | Should -Match 'disabled until the start date'
+            $decision.Changes['accountEnabled'].To | Should -BeTrue
+            $decision.Reason | Should -Match 'ahead of the start date'
         }
 
-        It 'enables a staged identity once the start date arrives' {
-            $identity = New-TestIdentity -Set @{ accountEnabled = $false }
-            $decision = Get-IdentityDecision -Worker (New-TestWorker) -Identities @($identity) -Today $Today
-
-            $decision.Action | Should -Be 'Update'
-            @($decision.Changes.Keys) | Should -Be @('accountEnabled')
-        }
-
-        It 'leaves a staged identity disabled before the start date' {
-            $worker   = New-TestWorker -Set @{ startDate = '2026-11-18' }
-            $identity = New-TestIdentity -Set @{ accountEnabled = $false }
-            $decision = Get-IdentityDecision -Worker $worker -Identities @($identity) -Today $Today
-
-            $decision.Action | Should -Be 'NoChange'
-        }
     }
 
     Context 'Mover' {

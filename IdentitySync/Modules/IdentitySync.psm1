@@ -203,9 +203,8 @@ function Get-IdentityDecision {
           2. More than one identity with this employeeId -> ManualReview
           3. Status and end date contradict each other   -> ManualReview
           4. No identity, leaver                         -> NoChange
-          5. No identity, joiner                         -> Create (disabled until
-                                                            the start date if it
-                                                            is in the future)
+          5. No identity, joiner                         -> Create (enabled, even
+                                                            before the start date)
           6. Identity exists, leaver, still enabled      -> Disable
           7. Identity exists, leaver, already disabled   -> NoChange
           8. Identity exists, active, department or      -> Update (changed
@@ -272,12 +271,11 @@ function Get-IdentityDecision {
             $changes[$script:CreateAttributes[$hrisField]] = New-AttributeChange $null (Get-RecordValue $Worker $hrisField)
         }
 
-        # Future joiners get their account now, but disabled, so it is ready on
-        # day one without being usable before the start date.
-        $startsLater = $startDate -gt $Today
-        $changes['accountEnabled'] = New-AttributeChange $null (-not $startsLater)
-        if ($startsLater) {
-            $reason = 'New joiner starting {0}; create the identity disabled until the start date' -f $startDate.ToString($script:DateFormat)
+        # Every new identity is created enabled. Future joiners get theirs now,
+        # before the start date, so it is ready for them on day one.
+        $changes['accountEnabled'] = New-AttributeChange $null $true
+        if ($startDate -gt $Today) {
+            $reason = 'New joiner starting {0}; create the identity now, ahead of the start date' -f $startDate.ToString($script:DateFormat)
         }
         else {
             $reason = 'New joiner with no existing identity'
@@ -310,16 +308,7 @@ function Get-IdentityDecision {
         }
     }
 
-    # An identity created disabled for a future joiner is enabled once the start date arrives.
-    $hasStarted = $startDate -le $Today
-    if (-not $enabled -and $hasStarted) {
-        $changes['accountEnabled'] = New-AttributeChange $false $true
-    }
-
     if ($changes.Count -eq 0) {
-        if (-not $enabled) {
-            return New-Decision $Worker 'NoChange' 'Identity matches the HRIS record and stays disabled until the start date'
-        }
         return New-Decision $Worker 'NoChange' 'Identity already matches the HRIS record'
     }
     return New-Decision $Worker 'Update' ('Changed attributes: {0}' -f (@($changes.Keys) -join ', ')) $changes

@@ -27,7 +27,7 @@ function Read-JsonArray {
     .PARAMETER Description
         What the file holds, such as 'Workers'. Used in error messages.
     .EXAMPLE
-        $workers = Read-JsonArray -Path .\Mocks\hris-workers.json -Description 'Workers'
+        $workers = Read-JsonArray -Path .\Mocks\HRIS-Workers.json -Description 'Workers'
     #>
     [CmdletBinding()]
     param(

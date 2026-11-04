@@ -38,17 +38,17 @@ $script:ActionOrder = @('Create', 'Update', 'Disable', 'NoChange', 'ManualReview
 # records that share an employeeId. Note = text shown after the row when its
 # values differ, to explain why the difference does not cause an Update.
 $script:ComparisonRows = @(
-    @{ Label = 'Employee ID'; Hris = 'employeeId';        Entra = 'employeeId';        Across = $true }
-    @{ Label = 'First name';  Hris = 'firstName';         Entra = 'givenName';         Across = $true; Note = '(not synced)' }
-    @{ Label = 'Last name';   Hris = 'lastName';          Entra = 'surname';           Across = $true; Note = '(not synced)' }
-    @{ Label = 'Status';      Hris = 'status';            Entra = $null }
-    @{ Label = 'Account';     Hris = $null;               Entra = 'accountEnabled' }
-    @{ Label = 'Department';  Hris = 'department';        Entra = 'department';        Across = $true }
-    @{ Label = 'Manager';     Hris = 'managerEmployeeId'; Entra = 'managerEmployeeId'; Across = $true }
-    @{ Label = 'Start date';  Hris = 'startDate';         Entra = $null }
-    @{ Label = 'End date';    Hris = 'endDate';           Entra = $null }
-    @{ Label = 'Email';       Hris = 'email';             Entra = 'mail';              Across = $true; Note = '(handled by email write-back)' }
-    @{ Label = 'Object ID';   Hris = $null;               Entra = 'id' }
+    @{ Label = 'Employee ID'; HRIS = 'employeeId';        Entra = 'employeeId';        Across = $true }
+    @{ Label = 'First name';  HRIS = 'firstName';         Entra = 'givenName';         Across = $true; Note = '(not synced)' }
+    @{ Label = 'Last name';   HRIS = 'lastName';          Entra = 'surname';           Across = $true; Note = '(not synced)' }
+    @{ Label = 'Status';      HRIS = 'status';            Entra = $null }
+    @{ Label = 'Account';     HRIS = $null;               Entra = 'accountEnabled' }
+    @{ Label = 'Department';  HRIS = 'department';        Entra = 'department';        Across = $true }
+    @{ Label = 'Manager';     HRIS = 'managerEmployeeId'; Entra = 'managerEmployeeId'; Across = $true }
+    @{ Label = 'Start date';  HRIS = 'startDate';         Entra = $null }
+    @{ Label = 'End date';    HRIS = 'endDate';           Entra = $null }
+    @{ Label = 'Email';       HRIS = 'email';             Entra = 'mail';              Across = $true; Note = '(handled by email write-back)' }
+    @{ Label = 'Object ID';   HRIS = $null;               Entra = 'id' }
 )
 #endregion
 
@@ -86,13 +86,13 @@ function Write-ComparisonTable {
     param($Decision)
 
     # Build the columns: every HRIS record, then every Entra account.
-    $hrisRecords = @($Decision.HrisRecords)
+    $HRISRecords = @($Decision.HRISRecords)
     $entraIds    = @($Decision.EntraIdentities)
 
     $columns = [System.Collections.Generic.List[object]]::new()
-    for ($i = 0; $i -lt $hrisRecords.Count; $i++) {
-        $header = if ($hrisRecords.Count -gt 1) { "HRIS #$($i + 1)" } else { 'HRIS' }
-        $columns.Add([pscustomobject]@{ Header = $header; Side = 'Hris'; Record = $hrisRecords[$i] })
+    for ($i = 0; $i -lt $HRISRecords.Count; $i++) {
+        $header = if ($HRISRecords.Count -gt 1) { "HRIS #$($i + 1)" } else { 'HRIS' }
+        $columns.Add([pscustomobject]@{ Header = $header; Side = 'HRIS'; Record = $HRISRecords[$i] })
     }
     if ($entraIds.Count -eq 0) {
         $columns.Add([pscustomobject]@{ Header = 'Entra (no account)'; Side = 'Entra'; Record = $null })
@@ -106,7 +106,7 @@ function Write-ComparisonTable {
     # each column can be made as wide as its longest value.
     $table = foreach ($row in $script:ComparisonRows) {
         $cells = foreach ($column in $columns) {
-            $field = if ($column.Side -eq 'Hris') { $row.Hris } else { $row.Entra }
+            $field = if ($column.Side -eq 'HRIS') { $row.HRIS } else { $row.Entra }
             , (Get-CellText -Record $column.Record -Field $field)
         }
         [pscustomobject]@{ Row = $row; Cells = @($cells) }

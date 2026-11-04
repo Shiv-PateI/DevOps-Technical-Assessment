@@ -29,11 +29,11 @@
 
 .PARAMETER WorkersPath
     The HRIS workers JSON file. Defaults to the mock in
-    IdentitySync\Mocks\hris-workers.json.
+    IdentitySync\Mocks\HRIS-Workers.json.
 
 .PARAMETER IdentitiesPath
     The Entra identities JSON file. Defaults to the mock in
-    IdentitySync\Mocks\entra-identities.json.
+    IdentitySync\Mocks\Entra-Identities.json.
 
 .PARAMETER Today
     The date the rules treat as today. Defaults to the current date.
@@ -44,9 +44,9 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $WorkersPath = (Join-Path $PSScriptRoot '..\Mocks\hris-workers.json'),
+    [string] $WorkersPath = (Join-Path $PSScriptRoot '..\Mocks\HRIS-Workers.json'),
 
-    [string] $IdentitiesPath = (Join-Path $PSScriptRoot '..\Mocks\entra-identities.json'),
+    [string] $IdentitiesPath = (Join-Path $PSScriptRoot '..\Mocks\Entra-Identities.json'),
 
     [datetime] $Today = (Get-Date).Date
 )

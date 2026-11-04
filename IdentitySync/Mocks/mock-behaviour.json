@@ -1,0 +1,17 @@
+{
+    "mailDomain": "example.com",
+    "entra": {
+        "failures": {
+            "E9011": { "statusCode": 503, "times": "always" }
+        }
+    },
+    "exchange": {
+        "readyAfterChecks": 2,
+        "neverReady": [ "E9012" ]
+    },
+    "hris": {
+        "failures": {
+            "E9015": { "statusCode": 503, "times": "always" }
+        }
+    }
+}

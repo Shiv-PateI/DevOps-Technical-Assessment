@@ -98,7 +98,7 @@ function New-AttributeChange {
     [pscustomobject]@{ From = $From; To = $To }
 }
 
-# Builds the decision object returned for every worker. HrisRecords and
+# Builds the decision object returned for every worker. HRISRecords and
 # EntraIdentities hold the data the decision was based on, so it can be shown
 # alongside the result; Get-IdentityDecision and Get-IdentityPlan fill them in.
 function New-Decision {
@@ -117,7 +117,7 @@ function New-Decision {
         Action          = $Action
         Reason          = $Reason
         Changes         = $Changes
-        HrisRecords     = @($Worker)
+        HRISRecords     = @($Worker)
         EntraIdentities = @()
     }
 }
@@ -286,8 +286,8 @@ function Resolve-IdentityDecision {
 
         # A new identity gets its name, department and manager.
         $changes = [ordered]@{}
-        foreach ($hrisField in $script:CreateAttributes.Keys) {
-            $changes[$script:CreateAttributes[$hrisField]] = New-AttributeChange $null (Get-RecordValue $Worker $hrisField)
+        foreach ($HRISField in $script:CreateAttributes.Keys) {
+            $changes[$script:CreateAttributes[$HRISField]] = New-AttributeChange $null (Get-RecordValue $Worker $HRISField)
         }
 
         # Every new identity is created enabled. Future joiners get theirs now,
@@ -316,10 +316,10 @@ function Resolve-IdentityDecision {
 
     # 8 and 9. Active worker with an identity: compare only department and manager.
     $changes = [ordered]@{}
-    foreach ($hrisField in $script:SyncedAttributes.Keys) {
-        $entraField = $script:SyncedAttributes[$hrisField]
+    foreach ($HRISField in $script:SyncedAttributes.Keys) {
+        $entraField = $script:SyncedAttributes[$HRISField]
         $current    = Get-RecordValue $identity $entraField
-        $wanted     = Get-RecordValue $Worker $hrisField
+        $wanted     = Get-RecordValue $Worker $HRISField
 
         # Compared as strings so that $null and '' count as the same empty value.
         if ([string] $current -cne [string] $wanted) {
@@ -406,7 +406,7 @@ function Get-IdentityPlan {
             '{0} HRIS records share employeeId {1} ({2}); HR must remove the duplicate before this worker is synced' -f $records.Count, $key, $detail)
 
         # Keep every record and matching identity for this employeeId, so all of them can be shown.
-        $decision.HrisRecords     = $records.ToArray()
+        $decision.HRISRecords     = $records.ToArray()
         $decision.EntraIdentities = $matching
         $decision
     }

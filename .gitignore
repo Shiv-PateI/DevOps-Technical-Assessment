@@ -1,0 +1,3 @@
+# Runtime state written by Invoke-IdentitySync.ps1 -Apply: the sync state and
+# the saved mock service data. Created on each machine, never committed.
+IdentitySync/State/

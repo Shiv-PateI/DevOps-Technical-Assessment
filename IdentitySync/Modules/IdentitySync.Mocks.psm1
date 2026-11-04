@@ -19,6 +19,7 @@
 
     Mock-only commands (not part of any real module):
       Initialize-MockServices   Loads the mock data and behaviour. Call first.
+      Save-MockServices         Saves the mock data so the next run carries on.
       Set-MockActivityOutput    Turns the activity lines on or off.
 
     Microsoft Graph (Microsoft.Graph.Authentication / Microsoft.Graph.Users):
@@ -70,6 +71,9 @@ Set-StrictMode -Version Latest
 # Whether each mock call prints a line saying what it did. On by default.
 $script:ShowActivity = $true
 
+# Spaces printed before each activity line.
+$script:ActivityIndent = 0
+
 # The mock data, set by Initialize-MockServices.
 $script:State = $null
 
@@ -100,7 +104,7 @@ function Write-MockActivity {
     )
 
     if (-not $script:ShowActivity) { return }
-    Write-Host ('{0,-17}' -f "[$Source mock]") -ForegroundColor DarkCyan -NoNewline
+    Write-Host ((' ' * $script:ActivityIndent) + ('{0,-17}' -f "[$Source mock]")) -ForegroundColor DarkCyan -NoNewline
     Write-Host $Message -ForegroundColor $Colour
 }
 
@@ -289,6 +293,12 @@ function Initialize-MockServices {
     .PARAMETER HRISApiToken
         The token HRIS callers must send. In a real deployment this would come
         from a secret store; it is never written to output or errors.
+    .PARAMETER FromPath
+        A file written earlier by Save-MockServices. When it exists, the mock
+        data is restored from it instead of from -Identities and -Workers, so
+        users, mailboxes and HRIS emails created by an earlier run are still
+        there, as they would be in the real services. -Behaviour and
+        -HRISApiToken still apply.
     .EXAMPLE
         Initialize-MockServices -Identities $identities -Workers $workers -Behaviour $behaviour -HRISApiToken 'test-token'
     #>
@@ -297,7 +307,8 @@ function Initialize-MockServices {
         [AllowEmptyCollection()] [object[]] $Identities = @(),
         [AllowEmptyCollection()] [object[]] $Workers = @(),
         $Behaviour,
-        [string] $HRISApiToken = 'test-token'
+        [string] $HRISApiToken = 'test-token',
+        [string] $FromPath
     )
 
     $mailDomain = Get-MockValue $Behaviour 'mailDomain'
@@ -313,6 +324,34 @@ function Initialize-MockServices {
         HRISWorkers       = [System.Collections.Generic.List[object]]::new()
         HRISApiToken      = $HRISApiToken
         IdempotentResults = @{}
+    }
+
+    # Restore the data saved by an earlier run, if there is any.
+    $savedPath = if ($FromPath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FromPath) }
+    if ($savedPath -and (Test-Path -Path $savedPath -PathType Leaf)) {
+        $saved = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($savedPath))
+
+        foreach ($user in @($saved.Users)) { if ($user) { $state.Users.Add($user) } }
+        foreach ($worker in @($saved.HRISWorkers)) { if ($worker) { $state.HRISWorkers.Add($worker) } }
+        foreach ($address in @($saved.TakenAddresses)) { if ($address) { [void] $state.TakenAddresses.Add($address) } }
+        foreach ($entry in $saved.Mailboxes.PSObject.Properties) {
+            $state.Mailboxes[$entry.Name] = @{
+                EmployeeId = $entry.Value.EmployeeId
+                Address    = $entry.Value.Address
+                Checks     = [int] $entry.Value.Checks
+                Ready      = [bool] $entry.Value.Ready
+            }
+        }
+        foreach ($entry in $saved.CallCounts.PSObject.Properties) { $state.CallCounts[$entry.Name] = [int] $entry.Value }
+        foreach ($entry in $saved.IdempotentResults.PSObject.Properties) {
+            $state.IdempotentResults[$entry.Name] = @{ Request = $entry.Value.Request; Result = $entry.Value.Result }
+        }
+
+        $script:State     = $state
+        $script:Connected = @{ Graph = $false; Exchange = $false }
+        Write-MockActivity -Source 'Entra' -Colour Green -Message ('Mock tenant restored from the last run: {0} users' -f $state.Users.Count)
+        Write-MockActivity -Source 'HRIS' -Colour Green -Message ('Mock HRIS restored from the last run: {0} worker records' -f $state.HRISWorkers.Count)
+        return
     }
 
     foreach ($identity in $Identities) {
@@ -346,17 +385,64 @@ function Initialize-MockServices {
     Write-MockActivity -Source 'HRIS' -Colour Green -Message ('Mock HRIS loaded: {0} worker records; calls need an API token' -f $state.HRISWorkers.Count)
 }
 
+function Save-MockServices {
+    <#
+    .SYNOPSIS
+        Saves the mock data to a file, so the next run can carry on from it.
+    .DESCRIPTION
+        The real services keep their data between runs; the mocks only live in
+        memory. Saving them after each change, and restoring with
+        Initialize-MockServices -FromPath, means a second run sees the users,
+        mailboxes and HRIS emails the first run created. The HRIS API token
+        and the behaviour settings are not saved.
+    .EXAMPLE
+        Save-MockServices -Path .\State\mock-services.json
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Path)
+
+    Assert-MockInitialized
+    $fullPath  = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+    $directory = Split-Path -Path $fullPath -Parent
+    if (-not (Test-Path -Path $directory)) {
+        New-Item -ItemType Directory -Path $directory | Out-Null
+    }
+
+    $snapshot = [ordered]@{
+        Users             = @($script:State.Users)
+        Mailboxes         = $script:State.Mailboxes
+        TakenAddresses    = @($script:State.TakenAddresses)
+        CallCounts        = $script:State.CallCounts
+        HRISWorkers       = @($script:State.HRISWorkers)
+        IdempotentResults = $script:State.IdempotentResults
+    }
+
+    # Written to a temporary file first, then moved into place.
+    $tempPath = '{0}.tmp' -f $fullPath
+    [System.IO.File]::WriteAllText($tempPath, (ConvertTo-Json -InputObject $snapshot -Depth 6), [System.Text.UTF8Encoding]::new($false))
+    Move-Item -Path $tempPath -Destination $fullPath -Force
+}
+
 function Set-MockActivityOutput {
     <#
     .SYNOPSIS
-        Turns the line each mock call prints on or off.
+        Turns the line each mock call prints on or off, and sets its indent.
+    .PARAMETER Indent
+        Spaces before each line, so the lines can sit under a heading, such as
+        the worker they belong to.
     .EXAMPLE
         Set-MockActivityOutput -Enabled $false
+    .EXAMPLE
+        Set-MockActivityOutput -Enabled $true -Indent 14
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [bool] $Enabled)
+    param(
+        [Parameter(Mandatory)] [bool] $Enabled,
+        [ValidateRange(0, 40)] [int] $Indent = 0
+    )
 
-    $script:ShowActivity = $Enabled
+    $script:ShowActivity   = $Enabled
+    $script:ActivityIndent = $Indent
 }
 #endregion
 
@@ -865,7 +951,7 @@ function Set-HRISWorkerEmail {
 }
 #endregion
 
-Export-ModuleMember -Function Initialize-MockServices, Set-MockActivityOutput,
+Export-ModuleMember -Function Initialize-MockServices, Save-MockServices, Set-MockActivityOutput,
     Connect-MgGraph, Disconnect-MgGraph, Get-MgUser, New-MgUser, Update-MgUser, Set-MgUserManagerByRef,
     Connect-ExchangeOnline, Disconnect-ExchangeOnline, Get-EXOMailbox,
     Get-HRISWorker, Set-HRISWorkerEmail

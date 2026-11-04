@@ -8,12 +8,15 @@
     a short list of steps.
 
     Public functions:
-      Write-RunHeader          Prints the dry-run banner and what was read.
+      Write-RunHeader          Prints the run banner and what was read.
       Write-Decision           Prints one decision: action, reason, a table of
                                the HRIS record next to the Entra account, and
                                any attribute changes.
       Write-UnmatchedIdentity  Lists Entra identities with no HRIS record.
       Write-PlanSummary        Prints how many workers got each action.
+      Write-SectionHeading     Prints a section heading.
+      Write-WorkerOutcome      Prints what was done for one worker, under their decision.
+      Write-StageSummary       Prints how many workers are at each stage.
 #>
 
 Set-StrictMode -Version Latest
@@ -30,6 +33,26 @@ $script:ActionColours = @{
 
 # The actions in the order the summary lists them.
 $script:ActionOrder = @('Create', 'Update', 'Disable', 'NoChange', 'ManualReview')
+
+# Colour for each pipeline stage, and for the Update and Disable change results.
+# Green = finished, yellow = waiting or retrying, red = stopped for a person.
+$script:StageColours = @{
+    Pending         = 'DarkGray'
+    IdentityReady   = 'Yellow'
+    IdentityFailed  = 'Yellow'
+    MailboxPending  = 'Yellow'
+    MailboxReady    = 'Yellow'
+    WriteBackFailed = 'Yellow'
+    Complete        = 'Green'
+    ManualReview    = 'Red'
+    MailboxTimeout  = 'Red'
+    Update          = 'Cyan'
+    Disable         = 'Yellow'
+}
+
+# The stages in the order the stage summary lists them.
+$script:StageOrder = @('Complete', 'Pending', 'IdentityReady', 'IdentityFailed', 'MailboxPending',
+                       'MailboxReady', 'WriteBackFailed', 'ManualReview', 'MailboxTimeout')
 
 # Rows of the HRIS vs Entra table: the label, the HRIS field and the Entra
 # attribute shown in that row ($null where one side has no such field).
@@ -174,20 +197,26 @@ function Write-ComparisonTable {
 function Write-RunHeader {
     <#
     .SYNOPSIS
-        Prints the dry-run banner and how much was read.
+        Prints the run banner (dry run or applying changes) and how much was read.
     #>
     [CmdletBinding()]
     param(
         [int] $WorkerCount,
-        [int] $IdentityCount,
-        [datetime] $Today
+        [datetime] $Today,
+        [switch] $Apply
     )
 
     Write-Host ''
-    Write-Host 'DRY RUN: decisions only, nothing is changed.' -ForegroundColor Yellow
-    Write-Host 'Each decision shows the HRIS record next to the Entra account. Values that differ are in magenta.' -ForegroundColor DarkGray
-    Write-Host ('Read {0} HRIS records and {1} Entra identities. Today is {2}.' -f
-        $WorkerCount, $IdentityCount, $Today.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+    if ($Apply) {
+        Write-Host 'APPLYING CHANGES: Entra ID, Exchange Online and the HRIS will be updated.' -ForegroundColor Magenta
+        Write-Host 'Each worker below shows the decision, the data behind it, what was done, and the result.' -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host 'DRY RUN: decisions only, nothing is changed. Add -Apply to make the changes.' -ForegroundColor Yellow
+        Write-Host 'Each worker below shows the decision and the data behind it.' -ForegroundColor DarkGray
+    }
+    Write-Host 'In each table, values that differ between the HRIS and Entra are in magenta.' -ForegroundColor DarkGray
+    Write-Host ('Read {0} HRIS records. Today is {1}.' -f $WorkerCount, $Today.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
 }
 
 function Write-Decision {
@@ -195,26 +224,35 @@ function Write-Decision {
     .SYNOPSIS
         Prints one decision.
     .DESCRIPTION
-        Prints the action, employeeId and name, the reason, a table of the
-        HRIS record next to the Entra account, and for an Update or Disable
-        each attribute that would change. For example:
+        Prints a dividing line, then the action, employeeId and name (with the
+        worker's position in the run), the reason, a table of the HRIS record
+        next to the Entra account, and for an Update or Disable each attribute
+        that would change. For example:
 
-          Update        E9003      Quinn Roberts
+          ------------------------------------------------------------------
+          Update        E9003      Quinn Roberts  (8 of 23)
                         Changed attributes: department, managerEmployeeId
                         Field       HRIS                    Entra
                         ...
-                          department: Operations -> Finance
+                        Planned     department: Operations -> Finance
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Decision)
+    param(
+        [Parameter(Mandatory)] $Decision,
+        [int] $Number,
+        [int] $Total
+    )
 
     $colour = $script:ActionColours[$Decision.Action]
     $id     = if ($Decision.EmployeeId) { $Decision.EmployeeId } else { '(missing)' }
 
     Write-Host ''
+    Write-Host ('-' * 78) -ForegroundColor DarkGray
     Write-Host ('{0,-14}' -f $Decision.Action) -ForegroundColor $colour -NoNewline
     Write-Host ('{0,-11}' -f $id) -ForegroundColor Cyan -NoNewline
-    Write-Host $Decision.Name -ForegroundColor White
+    Write-Host $Decision.Name -ForegroundColor White -NoNewline
+    if ($Total -gt 0) { Write-Host ("  ($Number of $Total)") -ForegroundColor DarkGray -NoNewline }
+    Write-Host ''
     Write-Host ('{0,-14}{1}' -f '', $Decision.Reason) -ForegroundColor DarkGray
 
     # The data the decision was based on.
@@ -227,8 +265,46 @@ function Write-Decision {
             $change = $Decision.Changes[$attribute]
             $from   = if ($null -eq $change.From) { '-' } else { $change.From }
             $to     = if ($null -eq $change.To)   { '-' } else { $change.To }
-            Write-Host ('{0,-16}{1}: {2} -> {3}' -f '', $attribute, $from, $to) -ForegroundColor $colour
+            Write-Host ('{0,-14}{1,-12}' -f '', 'Planned') -ForegroundColor DarkGray -NoNewline
+            Write-Host ('{0}: {1} -> {2}' -f $attribute, $from, $to) -ForegroundColor $colour
         }
+    }
+}
+
+function Write-WorkerOutcome {
+    <#
+    .SYNOPSIS
+        Prints what happened for one worker in a run with -Apply.
+    .DESCRIPTION
+        Prints one Result line for the change to an existing identity (Update
+        or Disable) and one for the identity, mailbox and write-back stages,
+        under the worker's decision. For a worker with neither, for example a
+        ManualReview, it says nothing was done. For example:
+
+                        Result      Complete        Updated: Wrote alex.clarke@example.com to the HRIS
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Decision,
+        $Change,
+        $Stages
+    )
+
+    $results = @($Change, $Stages | Where-Object { $null -ne $_ })
+    if ($results.Count -eq 0) {
+        Write-Host ('{0,-14}{1,-12}' -f '', 'Result') -ForegroundColor DarkGray -NoNewline
+        Write-Host "Nothing done ($($Decision.Action))" -ForegroundColor $script:ActionColours[$Decision.Action]
+        return
+    }
+
+    foreach ($result in $results) {
+        $colour = $script:StageColours[$result.Stage]
+        if (-not $colour) { $colour = 'White' }
+        if ($result.Outcome -in 'Failed', 'Skipped' -and $result.Stage -in 'Update', 'Disable') { $colour = 'Red' }
+
+        Write-Host ('{0,-14}{1,-12}' -f '', 'Result') -ForegroundColor DarkGray -NoNewline
+        Write-Host ('{0,-16}' -f $result.Stage) -ForegroundColor $colour -NoNewline
+        Write-Host ('{0}: {1}' -f $result.Outcome, $result.Reason) -ForegroundColor DarkGray
     }
 }
 
@@ -272,6 +348,50 @@ function Write-PlanSummary {
         Write-Host ('  {0,-14}{1}' -f $action, $count) -ForegroundColor $script:ActionColours[$action]
     }
 }
+
+function Write-SectionHeading {
+    <#
+    .SYNOPSIS
+        Prints a section heading, such as 'Changes to existing identities'.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Text)
+
+    Write-Host ''
+    Write-Host $Text -ForegroundColor White
+    Write-Host ('-' * $Text.Length) -ForegroundColor DarkGray
+}
+
+function Write-StageSummary {
+    <#
+    .SYNOPSIS
+        Prints how many workers are at each stage, from the sync state.
+    .DESCRIPTION
+        Used at the end of a run with -Apply, and on a dry run to show what a
+        previous run left in progress.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $State,
+        [string] $Title = 'Workers by stage (from the sync state):'
+    )
+
+    $entries = @($State.workers.Values)
+    Write-Host ''
+    if ($entries.Count -eq 0) {
+        Write-Host 'The sync state is empty: no run has applied changes yet.' -ForegroundColor DarkGray
+        return
+    }
+
+    Write-Host $Title -ForegroundColor Green
+    foreach ($stage in $script:StageOrder) {
+        $atStage = @($entries | Where-Object { $_.stage -eq $stage } | Sort-Object employeeId)
+        if ($atStage.Count -eq 0) { continue }
+        Write-Host ('  {0,-17}{1,-4}' -f $stage, $atStage.Count) -ForegroundColor $script:StageColours[$stage] -NoNewline
+        Write-Host (@($atStage.employeeId) -join ', ') -ForegroundColor DarkGray
+    }
+}
 #endregion
 
-Export-ModuleMember -Function Write-RunHeader, Write-Decision, Write-UnmatchedIdentity, Write-PlanSummary
+Export-ModuleMember -Function Write-RunHeader, Write-Decision, Write-UnmatchedIdentity, Write-PlanSummary,
+    Write-SectionHeading, Write-WorkerOutcome, Write-StageSummary

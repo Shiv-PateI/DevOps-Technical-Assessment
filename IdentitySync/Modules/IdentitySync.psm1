@@ -40,11 +40,17 @@ $script:RequiredFields = @('employeeId', 'status', 'firstName', 'lastName', 'sta
 # The only accepted date format, matching the HRIS input.
 $script:DateFormat = 'yyyy-MM-dd'
 
-# HRIS fields that are kept in sync, and the Entra attribute each one maps to.
-# An Update only ever touches these attributes.
-$script:AttributeMap = [ordered]@{
+# HRIS fields set when an identity is created, and the Entra attribute each one maps to.
+$script:CreateAttributes = [ordered]@{
     firstName         = 'givenName'
     lastName          = 'surname'
+    department        = 'department'
+    managerEmployeeId = 'managerEmployeeId'
+}
+
+# HRIS fields kept in sync on an existing identity. An Update only ever touches
+# these attributes; names are set once at creation and not changed afterwards.
+$script:SyncedAttributes = [ordered]@{
     department        = 'department'
     managerEmployeeId = 'managerEmployeeId'
 }
@@ -202,8 +208,10 @@ function Get-IdentityDecision {
                                                             is in the future)
           6. Identity exists, leaver, still enabled      -> Disable
           7. Identity exists, leaver, already disabled   -> NoChange
-          8. Identity exists, active, attributes differ  -> Update (changed
-                                                            attributes only)
+          8. Identity exists, active, department or      -> Update (changed
+             manager differs                                attributes only;
+                                                            names are never
+                                                            updated)
           9. Identity exists and matches                 -> NoChange
     .PARAMETER Worker
         One HRIS worker record.
@@ -258,10 +266,10 @@ function Get-IdentityDecision {
             return New-Decision $Worker 'NoChange' 'Worker has left and no identity exists; nothing to disable'
         }
 
-        # A new identity gets every synced attribute.
+        # A new identity gets its name, department and manager.
         $changes = [ordered]@{}
-        foreach ($hrisField in $script:AttributeMap.Keys) {
-            $changes[$script:AttributeMap[$hrisField]] = New-AttributeChange $null (Get-RecordValue $Worker $hrisField)
+        foreach ($hrisField in $script:CreateAttributes.Keys) {
+            $changes[$script:CreateAttributes[$hrisField]] = New-AttributeChange $null (Get-RecordValue $Worker $hrisField)
         }
 
         # Future joiners get their account now, but disabled, so it is ready on
@@ -289,10 +297,10 @@ function Get-IdentityDecision {
         return New-Decision $Worker 'NoChange' 'Worker has left and the identity is already disabled'
     }
 
-    # 8 and 9. Active worker with an identity: compare only the synced attributes.
+    # 8 and 9. Active worker with an identity: compare only department and manager.
     $changes = [ordered]@{}
-    foreach ($hrisField in $script:AttributeMap.Keys) {
-        $entraField = $script:AttributeMap[$hrisField]
+    foreach ($hrisField in $script:SyncedAttributes.Keys) {
+        $entraField = $script:SyncedAttributes[$hrisField]
         $current    = Get-RecordValue $identity $entraField
         $wanted     = Get-RecordValue $Worker $hrisField
 

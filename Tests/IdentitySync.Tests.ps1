@@ -122,6 +122,13 @@ Describe 'Get-IdentityDecision' {
             $decision.Changes['department'].To | Should -Be 'Quality'
         }
 
+        It 'sets the first and last name on a new identity' {
+            $decision = Get-IdentityDecision -Worker (New-TestWorker) -Identities @() -Today $Today
+
+            $decision.Changes['givenName'].To | Should -Be 'Alex'
+            $decision.Changes['surname'].To | Should -Be 'Smith'
+        }
+
         It 'creates a disabled identity when the start date is in the future' {
             $worker   = New-TestWorker -Set @{ startDate = '2026-11-18' }
             $decision = Get-IdentityDecision -Worker $worker -Identities @() -Today $Today
@@ -162,6 +169,22 @@ Describe 'Get-IdentityDecision' {
         It 'returns NoChange when the identity already matches' {
             $decision = Get-IdentityDecision -Worker (New-TestWorker) -Identities @(New-TestIdentity) -Today $Today
             $decision.Action | Should -Be 'NoChange'
+        }
+
+        It 'does not update a first or last name that differs from Entra' {
+            $worker   = New-TestWorker -Set @{ firstName = 'Sam'; lastName = 'Jones' }
+            $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
+
+            $decision.Action | Should -Be 'NoChange'
+            $decision.Changes.Count | Should -Be 0
+        }
+
+        It 'updates only the department when the name and department both differ' {
+            $worker   = New-TestWorker -Set @{ lastName = 'Jones'; department = 'Finance' }
+            $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
+
+            $decision.Action | Should -Be 'Update'
+            @($decision.Changes.Keys) | Should -Be @('department')
         }
 
         It 'treats a null value and an empty string as the same' {

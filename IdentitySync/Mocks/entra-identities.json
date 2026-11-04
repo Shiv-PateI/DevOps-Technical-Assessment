@@ -6,7 +6,8 @@
         "givenName": "Jordan",
         "surname": "Brown",
         "department": "HR",
-        "managerEmployeeId": null
+        "managerEmployeeId": null,
+        "mail": "jordan.brown@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000001002",
@@ -15,7 +16,8 @@
         "givenName": "Morgan",
         "surname": "Green",
         "department": "HR",
-        "managerEmployeeId": "E1001"
+        "managerEmployeeId": "E1001",
+        "mail": "morgan.green@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000001003",
@@ -24,7 +26,8 @@
         "givenName": "Elliot",
         "surname": "Taylor",
         "department": "Operations",
-        "managerEmployeeId": "E1001"
+        "managerEmployeeId": "E1001",
+        "mail": "elliot.taylor@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000001004",
@@ -33,7 +36,8 @@
         "givenName": "Casey",
         "surname": "Thomas",
         "department": "Operations",
-        "managerEmployeeId": "E1001"
+        "managerEmployeeId": "E1001",
+        "mail": null
     },
     {
         "id": "00000000-0000-4000-8000-000000001005",
@@ -42,7 +46,8 @@
         "givenName": "Alex",
         "surname": "Clarke",
         "department": "HR",
-        "managerEmployeeId": "E1001"
+        "managerEmployeeId": "E1001",
+        "mail": "alex.clarke.hr@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000009003",
@@ -51,7 +56,8 @@
         "givenName": "Quinn",
         "surname": "Roberts",
         "department": "Operations",
-        "managerEmployeeId": "E1002"
+        "managerEmployeeId": "E1002",
+        "mail": "quinn.roberts@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000009004",
@@ -60,7 +66,8 @@
         "givenName": "Robin",
         "surname": "Walker",
         "department": "Estates",
-        "managerEmployeeId": "E1004"
+        "managerEmployeeId": "E1004",
+        "mail": "robin.walker@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000009010",
@@ -69,7 +76,8 @@
         "givenName": "Charlie",
         "surname": "Thomas",
         "department": "IT",
-        "managerEmployeeId": "E1002"
+        "managerEmployeeId": "E1002",
+        "mail": null
     },
     {
         "id": "00000000-0000-4000-8000-000000019010",
@@ -78,7 +86,8 @@
         "givenName": "Charles",
         "surname": "Thomas",
         "department": "IT",
-        "managerEmployeeId": "E1002"
+        "managerEmployeeId": "E1002",
+        "mail": null
     },
     {
         "id": "00000000-0000-4000-8000-000000009016",
@@ -87,7 +96,8 @@
         "givenName": "Morgan",
         "surname": "Wright",
         "department": "Care",
-        "managerEmployeeId": "E1004"
+        "managerEmployeeId": "E1004",
+        "mail": "morgan.wright@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000009017",
@@ -96,7 +106,8 @@
         "givenName": "Quinn",
         "surname": "Hall",
         "department": "Clinical",
-        "managerEmployeeId": "E1005"
+        "managerEmployeeId": "E1005",
+        "mail": "quinn.hall@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000008001",
@@ -105,6 +116,7 @@
         "givenName": "Drew",
         "surname": "Young",
         "department": "IT",
-        "managerEmployeeId": "E1003"
+        "managerEmployeeId": "E1003",
+        "mail": "drew.young@example.com"
     }
 ]

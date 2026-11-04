@@ -98,7 +98,9 @@ function New-AttributeChange {
     [pscustomobject]@{ From = $From; To = $To }
 }
 
-# Builds the decision object returned for every worker.
+# Builds the decision object returned for every worker. HrisRecords and
+# EntraIdentities hold the data the decision was based on, so it can be shown
+# alongside the result; Get-IdentityDecision and Get-IdentityPlan fill them in.
 function New-Decision {
     param(
         $Worker,
@@ -109,12 +111,14 @@ function New-Decision {
 
     $name = '{0} {1}' -f (Get-RecordValue $Worker 'firstName'), (Get-RecordValue $Worker 'lastName')
     [pscustomobject]@{
-        PSTypeName = 'IdentitySync.Decision'
-        EmployeeId = Get-RecordValue $Worker 'employeeId'
-        Name       = $name.Trim()
-        Action     = $Action
-        Reason     = $Reason
-        Changes    = $Changes
+        PSTypeName      = 'IdentitySync.Decision'
+        EmployeeId      = Get-RecordValue $Worker 'employeeId'
+        Name            = $name.Trim()
+        Action          = $Action
+        Reason          = $Reason
+        Changes         = $Changes
+        HrisRecords     = @($Worker)
+        EntraIdentities = @()
     }
 }
 #endregion
@@ -225,6 +229,21 @@ function Get-IdentityDecision {
         [Parameter(Mandatory)] $Worker,
         [AllowEmptyCollection()] [object[]] $Identities = @(),
         [datetime] $Today = (Get-Date).Date
+    )
+
+    # Decide, then record which Entra identities the decision was based on.
+    $Identities = @($Identities | Where-Object { $null -ne $_ })
+    $decision   = Resolve-IdentityDecision -Worker $Worker -Identities $Identities -Today $Today
+    $decision.EntraIdentities = $Identities
+    $decision
+}
+
+# Applies the decision rules listed on Get-IdentityDecision, in order.
+function Resolve-IdentityDecision {
+    param(
+        [Parameter(Mandatory)] $Worker,
+        [AllowEmptyCollection()] [object[]] $Identities = @(),
+        [datetime] $Today
     )
 
     $Today      = $Today.Date
@@ -376,12 +395,16 @@ function Get-IdentityPlan {
         if ($distinct.Count -eq 1) {
             $decision = Get-IdentityDecision -Worker $records[0] -Identities $matching -Today $Today
             $decision.Reason = '{0} ({1} identical records for this employeeId were treated as one)' -f $decision.Reason, $records.Count
-            $decision
         }
         else {
-            New-Decision $records[0] 'ManualReview' (
+            $decision = New-Decision $records[0] 'ManualReview' (
                 '{0} records share employeeId {1} but disagree; refusing to guess which is correct' -f $records.Count, $key)
+            $decision.EntraIdentities = $matching
         }
+
+        # Keep every record for this employeeId, so all of them can be shown.
+        $decision.HrisRecords = $records.ToArray()
+        $decision
     }
 }
 

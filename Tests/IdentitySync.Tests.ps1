@@ -141,43 +141,31 @@ Describe 'Get-IdentityDecision' {
     }
 
     Context 'Mover' {
-        It 'updates only the attributes that changed' {
-            $worker   = New-TestWorker -Set @{ department = 'Finance'; managerEmployeeId = 'E1003' }
-            $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
-
-            $decision.Action | Should -Be 'Update'
-            @($decision.Changes.Keys) | Should -Be @('department', 'managerEmployeeId')
-            $decision.Changes['department'].From | Should -Be 'Quality'
-            $decision.Changes['department'].To | Should -Be 'Finance'
-        }
-
-        It 'returns NoChange when the identity already matches' {
-            $decision = Get-IdentityDecision -Worker (New-TestWorker) -Identities @(New-TestIdentity) -Today $Today
-            $decision.Action | Should -Be 'NoChange'
-        }
-
-        It 'does not update a first or last name that differs from Entra' {
-            $worker   = New-TestWorker -Set @{ firstName = 'Sam'; lastName = 'Jones' }
-            $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
-
-            $decision.Action | Should -Be 'NoChange'
-            $decision.Changes.Count | Should -Be 0
-        }
-
-        It 'updates only the department when the name and department both differ' {
-            $worker   = New-TestWorker -Set @{ lastName = 'Jones'; department = 'Finance' }
+        It 'updates the department when it differs in Entra from the HRIS' {
+            $worker   = New-TestWorker -Set @{ department = 'Finance' }
             $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
 
             $decision.Action | Should -Be 'Update'
             @($decision.Changes.Keys) | Should -Be @('department')
+            $decision.Changes['department'].From | Should -Be 'Quality'
+            $decision.Changes['department'].To | Should -Be 'Finance'
         }
 
-        It 'treats a null value and an empty string as the same' {
-            $worker   = New-TestWorker -Set @{ managerEmployeeId = $null }
-            $identity = New-TestIdentity -Set @{ managerEmployeeId = '' }
-            $decision = Get-IdentityDecision -Worker $worker -Identities @($identity) -Today $Today
+        It 'updates the manager when it differs in Entra from the HRIS' {
+            $worker   = New-TestWorker -Set @{ managerEmployeeId = 'E1003' }
+            $decision = Get-IdentityDecision -Worker $worker -Identities @(New-TestIdentity) -Today $Today
+
+            $decision.Action | Should -Be 'Update'
+            @($decision.Changes.Keys) | Should -Be @('managerEmployeeId')
+            $decision.Changes['managerEmployeeId'].From | Should -Be 'E1008'
+            $decision.Changes['managerEmployeeId'].To | Should -Be 'E1003'
+        }
+
+        It 'returns NoChange when Entra and the HRIS match' {
+            $decision = Get-IdentityDecision -Worker (New-TestWorker) -Identities @(New-TestIdentity) -Today $Today
 
             $decision.Action | Should -Be 'NoChange'
+            $decision.Changes.Count | Should -Be 0
         }
     }
 

@@ -340,8 +340,9 @@ function Get-IdentityPlan {
     .DESCRIPTION
         Groups records by employeeId first, so each employeeId gets exactly one
         decision:
-          - identical duplicate records are treated as one record
-          - duplicate records that disagree go to ManualReview
+          - any employeeId with more than one record goes to ManualReview,
+            even when the records are identical, because the HRIS should
+            hold one record per worker and the duplicate must be removed there
           - records with no employeeId are each decided on their own (and fail
             validation), never grouped together
         Each worker is then decided against the Entra identities with the same
@@ -390,20 +391,23 @@ function Get-IdentityPlan {
             continue
         }
 
-        # Several records share this employeeId. Compare their full content.
+        # Several records share this employeeId. The HRIS should hold one record
+        # per worker, so nothing is done until HR removes the duplicate. The
+        # reason says whether the records are identical or disagree, so HR
+        # knows whether to just delete one or work out which is correct.
         $distinct = @($records | ForEach-Object { ConvertTo-Json -InputObject $_ -Compress -Depth 5 } | Select-Object -Unique)
         if ($distinct.Count -eq 1) {
-            $decision = Get-IdentityDecision -Worker $records[0] -Identities $matching -Today $Today
-            $decision.Reason = '{0} ({1} identical records for this employeeId were treated as one)' -f $decision.Reason, $records.Count
+            $detail = 'identical'
         }
         else {
-            $decision = New-Decision $records[0] 'ManualReview' (
-                '{0} records share employeeId {1} but disagree; refusing to guess which is correct' -f $records.Count, $key)
-            $decision.EntraIdentities = $matching
+            $detail = 'different'
         }
+        $decision = New-Decision $records[0] 'ManualReview' (
+            '{0} HRIS records share employeeId {1} ({2}); HR must remove the duplicate before this worker is synced' -f $records.Count, $key, $detail)
 
-        # Keep every record for this employeeId, so all of them can be shown.
-        $decision.HrisRecords = $records.ToArray()
+        # Keep every record and matching identity for this employeeId, so all of them can be shown.
+        $decision.HrisRecords     = $records.ToArray()
+        $decision.EntraIdentities = $matching
         $decision
     }
 }

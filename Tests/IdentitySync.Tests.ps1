@@ -246,12 +246,12 @@ Describe 'Get-IdentityPlan' {
         $decision[0].Action | Should -Be 'Create'
     }
 
-    It 'treats identical duplicate records as one, so there is no duplicate action' {
+    It 'sends identical duplicate records to ManualReview instead of creating an identity' {
         $plan = @(Get-IdentityPlan -Workers @((New-TestWorker), (New-TestWorker)) -Today $Today)
 
         $plan | Should -HaveCount 1
-        $plan[0].Action | Should -Be 'Create'
-        $plan[0].Reason | Should -Match '2 identical records'
+        $plan[0].Action | Should -Be 'ManualReview'
+        $plan[0].Reason | Should -Match '2 HRIS records share employeeId E1042 \(identical\)'
     }
 
     It 'sends duplicate records that disagree to ManualReview' {
@@ -261,7 +261,14 @@ Describe 'Get-IdentityPlan' {
 
         $plan | Should -HaveCount 1
         $plan[0].Action | Should -Be 'ManualReview'
-        $plan[0].Reason | Should -Match 'disagree'
+        $plan[0].Reason | Should -Match '2 HRIS records share employeeId E1042 \(different\)'
+    }
+
+    It 'sends duplicate records to ManualReview even when the worker already has an identity' {
+        $plan = @(Get-IdentityPlan -Workers @((New-TestWorker), (New-TestWorker)) -Identities @(New-TestIdentity) -Today $Today)
+
+        $plan | Should -HaveCount 1
+        $plan[0].Action | Should -Be 'ManualReview'
     }
 
     It 'does not merge employeeIds that differ only by case' {

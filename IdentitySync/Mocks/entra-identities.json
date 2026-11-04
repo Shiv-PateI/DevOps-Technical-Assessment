@@ -37,7 +37,7 @@
         "surname": "Thomas",
         "department": "Operations",
         "managerEmployeeId": "E1001",
-        "mail": null
+        "mail": "casey.thomas@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000001005",
@@ -77,7 +77,7 @@
         "surname": "Thomas",
         "department": "IT",
         "managerEmployeeId": "E1002",
-        "mail": null
+        "mail": "charlie.thomas@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000019010",
@@ -87,7 +87,7 @@
         "surname": "Thomas",
         "department": "IT",
         "managerEmployeeId": "E1002",
-        "mail": null
+        "mail": "charles.thomas@example.com"
     },
     {
         "id": "00000000-0000-4000-8000-000000009016",

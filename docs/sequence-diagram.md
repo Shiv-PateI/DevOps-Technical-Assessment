@@ -78,7 +78,7 @@ sequenceDiagram
     else Still failing after attempt 4
         Svc-->>Retry: 503
         Retry-->>Sync: Error (gave up after 4 attempts)
-        Note over Sync: Stage recorded as failed;<br/>only this stage runs next time
+        Note over Sync: Stage recorded as failed,<br/>only this stage runs next time
     end
     Note over Retry,Svc: 400, 401, 404, 409 and 422 are never retried
 ```
@@ -111,7 +111,7 @@ sequenceDiagram
         EXO-->>Sync: 404
         Sync->>State: Still MailboxPending
     else Still missing after 24 hours
-        Sync->>State: MailboxTimeout (stops; a person checks licensing)
+        Sync->>State: MailboxTimeout (stops, a person checks licensing)
     end
 
     Note over Sync,HRIS: E9015: write-back only (no create, no mailbox wait)

@@ -456,6 +456,7 @@ function Connect-MgGraph {
         for a managed identity, and ignores their values. No credentials are
         checked or stored.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Accepted for compatibility with the real command; the mock does not need its value.')]
     [CmdletBinding()]
     param(
         [string[]] $Scopes,
@@ -498,6 +499,7 @@ function Get-MgUser {
     .EXAMPLE
         Get-MgUser -Filter "employeeId eq 'E9013'" -ExpandProperty manager
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Accepted for compatibility with the real command; the mock does not need its value.')]
     [CmdletBinding(DefaultParameterSetName = 'List')]
     param(
         [Parameter(Mandatory, ParameterSetName = 'Get')] [string] $UserId,
@@ -565,6 +567,7 @@ function New-MgUser {
             -Department Quality -EmployeeId E9013 -MailNickname alex.clarke `
             -UserPrincipalName E9013@example.com -PasswordProfile @{ Password = '...'; ForceChangePasswordNextSignIn = $true }
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '', Justification = 'Mirrors the real New-MgUser, which takes a PasswordProfile hashtable. The password is generated per user and never stored or printed.')]
     [CmdletBinding()]
     param(
         [switch] $AccountEnabled,
@@ -736,6 +739,7 @@ function Connect-ExchangeOnline {
         Accepts the parameters production code would use, such as
         -ManagedIdentity and -Organization, and ignores their values.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Accepted for compatibility with the real command; the mock does not need its value.')]
     [CmdletBinding()]
     param(
         [switch] $ManagedIdentity,
@@ -756,7 +760,7 @@ function Disconnect-ExchangeOnline {
     .SYNOPSIS
         Mock of Disconnect-ExchangeOnline.
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding()]
     param()
 
     $script:Connected['Exchange'] = $false
@@ -777,6 +781,7 @@ function Get-EXOMailbox {
     .EXAMPLE
         (Get-EXOMailbox -Identity $user.Id).PrimarySmtpAddress
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Accepted for compatibility with the real command; the mock does not need its value.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $Identity,

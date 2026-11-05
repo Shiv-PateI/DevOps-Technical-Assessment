@@ -89,6 +89,8 @@ BeforeAll {
     # Runs a script block and returns the activity lines it printed, as text.
     # Write-Host writes to the information stream (6), so 6>&1 captures it.
     function Get-ActivityLines {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Used in the nested script block.')]
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '', Justification = 'Failures are expected; only the printed lines are wanted.')]
         param([scriptblock] $Call)
         Set-MockActivityOutput -Enabled $true
         try { @(& { try { & $Call | Out-Null } catch { } } 6>&1 | ForEach-Object { "$_" }) -join "`n" }

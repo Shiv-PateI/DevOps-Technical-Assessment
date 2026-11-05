@@ -1,0 +1,113 @@
+# Continuous integration for the identity sync.
+#
+# On every push to main, every pull request, and on demand:
+#   lint   PSScriptAnalyzer over the whole repository, with the rules in
+#          PSScriptAnalyzerSettings.psd1. Fails on any error or warning, and
+#          shows each finding as an annotation on the file and line.
+#   test   All Pester tests, on both Windows PowerShell 5.1 and PowerShell 7,
+#          since the sync is written to run on either. Fails if any test
+#          fails, and uploads the results as a test report.
+#
+# Tool versions are pinned so a new release cannot change the result of the
+# same commit. Nothing here needs secrets: the tests use only the mocks.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only access to the repository is all either job needs.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels a run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PESTER_VERSION: '6.2.0'
+  PSSCRIPTANALYZER_VERSION: '1.25.0'
+
+jobs:
+  lint:
+    name: Lint (PSScriptAnalyzer)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -Scope CurrentUser -Force
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion $env:PSSCRIPTANALYZER_VERSION
+          $findings = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+
+          # Each finding becomes an annotation on the file and line in the GitHub UI.
+          foreach ($finding in $findings) {
+              # GitHub wants a forward-slash path relative to the repository root.
+              $file = (Resolve-Path -Path $finding.ScriptPath -Relative).Replace('\', '/') -replace '^\./', ''
+              $level = if ($finding.Severity -eq 'Error') { 'error' } else { 'warning' }
+              Write-Output "::$level file=$file,line=$($finding.Line)::$($finding.RuleName): $($finding.Message)"
+          }
+
+          if ($findings.Count -gt 0) {
+              $findings | Format-Table RuleName, Severity, ScriptName, Line -AutoSize | Out-String -Width 200 | Write-Output
+              throw "PSScriptAnalyzer found $($findings.Count) error(s) or warning(s)."
+          }
+          Write-Output 'PSScriptAnalyzer found no errors or warnings.'
+
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows PowerShell 5.1
+            shell: powershell
+          - name: PowerShell 7
+            shell: pwsh
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Show the PowerShell version
+        run: $PSVersionTable | Format-Table -AutoSize | Out-String | Write-Output
+
+      - name: Install Pester
+        run: |
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Install-Module Pester -RequiredVersion $env:PESTER_VERSION -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run the Pester tests
+        run: |
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = './Tests'
+          $configuration.Run.Exit = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          $configuration.TestResult.Enabled = $true
+          $configuration.TestResult.OutputFormat = 'NUnitXml'
+          $configuration.TestResult.OutputPath = 'test-results.xml'
+          Invoke-Pester -Configuration $configuration
+
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.shell }}
+          path: test-results.xml
+          if-no-files-found: warn

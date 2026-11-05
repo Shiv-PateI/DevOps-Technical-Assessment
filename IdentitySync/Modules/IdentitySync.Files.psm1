@@ -41,6 +41,7 @@ function Read-JsonArray {
         $workers = Read-JsonArray -Path .\Mocks\HRIS-Workers.json -Description 'Workers'
     #>
     [CmdletBinding()]
+    [OutputType([object[]])]
     param(
         [Parameter(Mandatory)] [string] $Path,
         [string] $Description = 'JSON'

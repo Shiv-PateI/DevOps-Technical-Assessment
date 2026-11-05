@@ -193,6 +193,7 @@ function Find-ManagerObjectId {
 # Sets a user's manager by the manager's employeeId. Returns a note when the
 # manager cannot be set, or nothing when it was set.
 function Set-ManagerByEmployeeId {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Used inside a script block passed to Invoke-ServiceCall, which the analyzer does not follow.')]
     param([string] $UserId, [string] $ManagerEmployeeId)
 
     $managerObjectId = Find-ManagerObjectId -EmployeeId $ManagerEmployeeId
@@ -323,7 +324,7 @@ function Get-SyncSettings {
 #region Changes to existing identities
 # Applies an Update or Disable decision to the worker's existing Entra identity.
 function Invoke-IdentityChange {
-    param($Decision, [hashtable] $Settings)
+    param($Decision)
 
     $identity = @($Decision.EntraIdentities)[0]
     $result   = @{ EmployeeId = $Decision.EmployeeId; Name = $Decision.Name; Stage = $Decision.Action }
@@ -357,6 +358,7 @@ function Invoke-IdentityChange {
 # Runs one worker through whichever stages are left, recording each in their
 # state entry. Returns the result of the last stage reached.
 function Invoke-WorkerPipeline {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'Used inside a script block passed to Invoke-ServiceCall, which the analyzer does not follow.')]
     param(
         $Decision,
         $Entry,
@@ -598,7 +600,7 @@ function Invoke-IdentitySyncRun {
                 '{0} disables planned, more than the limit of {1} per run; none applied. Check the HRIS export.' -f $disables.Count, $Settings.MaxDisablesPerRun)
         }
         elseif ($decision.Action -in 'Update', 'Disable') {
-            $change = Invoke-IdentityChange -Decision $decision -Settings $Settings
+            $change = Invoke-IdentityChange -Decision $decision
         }
         if ($change) { $changes.Add($change) }
 

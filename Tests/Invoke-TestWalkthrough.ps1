@@ -38,6 +38,7 @@
     .\Tests\Invoke-TestWalkthrough.ps1 -NoPause
     Runs every step straight through.
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'NoPause', Justification = 'Read inside Wait-NextStep.')]
 [CmdletBinding()]
 param([switch] $NoPause)
 

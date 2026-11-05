@@ -204,7 +204,8 @@ function Write-RunHeader {
     param(
         [int] $WorkerCount,
         [datetime] $Today,
-        [switch] $Apply
+        [switch] $Apply,
+        [string] $CorrelationId
     )
 
     Write-Host ''
@@ -218,6 +219,10 @@ function Write-RunHeader {
     }
     Write-Host 'In each table, values that differ between the HRIS and Entra are in magenta.' -ForegroundColor DarkGray
     Write-Host ('Read {0} HRIS records. Today is {1}.' -f $WorkerCount, $Today.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+    if ($CorrelationId) {
+        Write-Host 'Correlation ID: ' -ForegroundColor DarkGray -NoNewline
+        Write-Host $CorrelationId -ForegroundColor Cyan
+    }
 }
 
 function Write-Decision {

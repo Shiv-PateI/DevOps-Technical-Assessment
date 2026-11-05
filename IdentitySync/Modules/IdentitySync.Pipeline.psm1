@@ -547,7 +547,8 @@ function Invoke-IdentitySyncRun {
         retry (see Invoke-WithRetry), so the caller can show it.
     .PARAMETER OnWorkerDone
         Run with each decision, its change result and its stage result (either
-        can be $null) once everything for that worker is done.
+        can be $null) once everything for that worker is done. Also run on a
+        dry run, with both results $null, so every worker can be audited.
     .OUTPUTS
         An object with Identities, Decisions, Unmatched, Changes, Pipeline and Applied.
     #>
@@ -585,7 +586,11 @@ function Invoke-IdentitySyncRun {
     for ($i = 0; $i -lt $decisions.Count; $i++) {
         $decision = $decisions[$i]
         if ($OnDecision) { & $OnDecision $decision ($i + 1) $decisions.Count }
-        if (-not $Apply) { continue }
+        if (-not $Apply) {
+            # Nothing is done on a dry run, but the caller still hears about every worker (for the audit log).
+            if ($OnWorkerDone) { & $OnWorkerDone $decision $null $null }
+            continue
+        }
 
         $change = $null
         if ($decision.Action -eq 'Disable' -and $holdDisables) {

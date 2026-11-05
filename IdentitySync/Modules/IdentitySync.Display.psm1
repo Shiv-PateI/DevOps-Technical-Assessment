@@ -16,6 +16,7 @@
       Write-PlanSummary        Prints how many workers got each action.
       Write-SectionHeading     Prints a section heading.
       Write-WorkerOutcome      Prints what was done for one worker, under their decision.
+      Write-RetryNotice        Prints a line when a call is retried after a transient failure.
       Write-StageSummary       Prints how many workers are at each stage.
 #>
 
@@ -308,6 +309,22 @@ function Write-WorkerOutcome {
     }
 }
 
+function Write-RetryNotice {
+    <#
+    .SYNOPSIS
+        Prints one line when a call is about to be retried, under the worker
+        it belongs to, for example:
+
+                      [retry]          HTTP 503 on Get-MgUser E9011: attempt 1 of 4 failed, retrying in 0.6s
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Retry)
+
+    Write-Host ('{0,-14}{1,-17}' -f '', '[retry]') -ForegroundColor Yellow -NoNewline
+    Write-Host ('HTTP {0} on {1}: attempt {2} of {3} failed, retrying in {4}s' -f
+        $Retry.StatusCode, $Retry.Description, $Retry.Attempt, $Retry.MaxAttempts, $Retry.DelaySeconds) -ForegroundColor Yellow
+}
+
 function Write-UnmatchedIdentity {
     <#
     .SYNOPSIS
@@ -394,4 +411,4 @@ function Write-StageSummary {
 #endregion
 
 Export-ModuleMember -Function Write-RunHeader, Write-Decision, Write-UnmatchedIdentity, Write-PlanSummary,
-    Write-SectionHeading, Write-WorkerOutcome, Write-StageSummary
+    Write-SectionHeading, Write-WorkerOutcome, Write-RetryNotice, Write-StageSummary

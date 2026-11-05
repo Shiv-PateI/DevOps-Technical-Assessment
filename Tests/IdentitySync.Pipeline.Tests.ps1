@@ -19,7 +19,7 @@
 
 BeforeAll {
     $modules = Join-Path $PSScriptRoot '..\IdentitySync\Modules'
-    foreach ($module in 'IdentitySync.psm1', 'IdentitySync.Files.psm1', 'IdentitySync.Mocks.psm1', 'IdentitySync.Pipeline.psm1') {
+    foreach ($module in 'IdentitySync.psm1', 'IdentitySync.Files.psm1', 'IdentitySync.Retry.psm1', 'IdentitySync.Mocks.psm1', 'IdentitySync.Pipeline.psm1') {
         Import-Module (Join-Path $modules $module) -Force
     }
     Set-MockActivityOutput -Enabled $false
@@ -66,13 +66,16 @@ BeforeAll {
         New-SyncState
     }
 
-    # Runs one sync with -Apply and returns the run.
+    # Runs one sync with -Apply and returns the run. Retries do not wait in
+    # tests (RetryBaseDelaySeconds 0) unless a test overrides it.
     function Invoke-Run {
         param(
             [object[]] $Workers, $State, [datetime] $At = $Now, [hashtable] $Override = @{}, [switch] $DryRun
         )
+        $settings = @{ RetryBaseDelaySeconds = 0 }
+        foreach ($key in $Override.Keys) { $settings[$key] = $Override[$key] }
         Invoke-IdentitySyncRun -Workers $Workers -State $State -Apply:(-not $DryRun) -Today $Today -Now $At `
-            -HRISToken $Token -Settings (Get-SyncSettings -Override $Override)
+            -HRISToken $Token -Settings (Get-SyncSettings -Override $settings)
     }
 
     # Returns the pipeline result for one employeeId from a run.
@@ -197,12 +200,24 @@ Describe 'Mailbox not ready' {
 }
 
 Describe 'HRIS write-back' {
-    It 'retries only the write-back after it fails, without recreating the identity' {
+    It 'recovers from a brief write-back failure within the same run' {
+        # Fails twice, then works: the retry inside the run is enough.
         $workers = @(New-Worker)
-        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -HRISFailures @{ E2001 = @{ statusCode = 503; times = 1 } })
+        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -HRISFailures @{ E2001 = @{ statusCode = 503; times = 2 } })
+        $result  = Get-Result (Invoke-Run -Workers $workers -State $state) 'E2001'
+
+        $result.Stage | Should -Be 'Complete'
+        Get-HRISEmail 'E2001' | Should -Be 'sam.jones@example.com'
+    }
+
+    It 'retries only the write-back on the next run when every attempt in this run fails' {
+        # Fails 4 times, so all 4 attempts in the first run fail; the next run works.
+        $workers = @(New-Worker)
+        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -HRISFailures @{ E2001 = @{ statusCode = 503; times = 4 } })
 
         $first = Get-Result (Invoke-Run -Workers $workers -State $state) 'E2001'
         $first.Stage | Should -Be 'WriteBackFailed'
+        $first.Reason | Should -Match 'gave up after 4 attempts'
         $objectId = $state.workers['E2001'].entraObjectId
 
         $second = Get-Result (Invoke-Run -Workers $workers -State $state) 'E2001'
@@ -234,17 +249,35 @@ Describe 'HRIS write-back' {
 }
 
 Describe 'Transient identity failure' {
-    It 'records IdentityFailed without creating anything, then succeeds on a later run' {
+    It 'recovers from a brief throttling failure within the same run, creating one identity' {
+        # Two 429s, then the call works: retried with back-off inside the run.
         $workers = @(New-Worker)
-        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -EntraFailures @{ E2001 = @{ statusCode = 503; times = 1 } })
+        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -EntraFailures @{ E2001 = @{ statusCode = 429; times = 2 } })
+        $result  = Get-Result (Invoke-Run -Workers $workers -State $state -Override @{ RetryMaxDelaySeconds = 0 }) 'E2001'
+
+        $result.Stage | Should -Be 'Complete'
+        Get-EntraCount 'E2001' | Should -Be 1
+    }
+
+    It 'records IdentityFailed without creating anything when every attempt fails, then succeeds on a later run' {
+        $workers = @(New-Worker)
+        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -EntraFailures @{ E2001 = @{ statusCode = 503; times = 4 } })
 
         $first = Get-Result (Invoke-Run -Workers $workers -State $state) 'E2001'
         $first.Stage | Should -Be 'IdentityFailed'
-        $first.Reason | Should -Match 'HTTP 503'
+        $first.Reason | Should -Match 'HTTP 503.*gave up after 4 attempts'
         Get-EntraCount 'E2001' | Should -Be 0
 
         (Get-Result (Invoke-Run -Workers $workers -State $state) 'E2001').Stage | Should -Be 'Complete'
         Get-EntraCount 'E2001' | Should -Be 1
+    }
+
+    It 'makes no more attempts than RetryMaxAttempts' {
+        $workers = @(New-Worker)
+        $state   = Initialize-Run -Workers $workers -Behaviour (New-Behaviour -EntraFailures @{ E2001 = @{ statusCode = 503; times = 'always' } })
+        $result  = Get-Result (Invoke-Run -Workers $workers -State $state -Override @{ RetryMaxAttempts = 2 }) 'E2001'
+
+        $result.Reason | Should -Match 'gave up after 2 attempts'
     }
 }
 

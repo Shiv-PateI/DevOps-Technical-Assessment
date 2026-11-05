@@ -47,9 +47,19 @@
                           Same address already there: NoChange. A different
                           address: ManualReview, never overwritten.
 
-    A failure in one stage leaves the earlier stages done, so only the failed
-    stage is retried on the next run. Workers that reach Complete,
-    ManualReview or MailboxTimeout are not processed again.
+    Retries happen at two levels:
+      Within a run    Every call to Graph, Exchange and the HRIS goes through
+                      Invoke-WithRetry (IdentitySync.Retry.psm1): a 429, 502,
+                      503 or 504 is retried with exponential back-off, up to
+                      RetryMaxAttempts. Only after that does the stage fail.
+      Across runs     A failed stage leaves the earlier stages done, so only
+                      the failed stage is tried again on the next run.
+    Workers that reach Complete, ManualReview or MailboxTimeout are not
+    processed again.
+
+    Retrying a create is made safe by looking before every attempt (see the
+    identity stage), and retrying the HRIS write is safe because of its
+    idempotency key.
 
     Public functions:
       New-SyncState          An empty sync state.
@@ -69,7 +79,14 @@ $script:DefaultSettings = @{
     MailboxTimeoutHours      = 24     # after this, a missing mailbox stops at MailboxTimeout
     MaxDisablesPerRun        = 5      # more planned disables than this and none are applied
     UpnDomain                = 'example.com'
+    RetryMaxAttempts         = 4      # attempts per call on 429, 502, 503 or 504, including the first
+    RetryBaseDelaySeconds    = 2      # first wait between attempts; doubles each time (2, 4, 8)
+    RetryMaxDelaySeconds     = 30     # the longest wait between attempts
 }
+
+# How calls are retried during a run: the settings and the -OnRetry callback.
+# Set at the start of Invoke-IdentitySyncRun.
+$script:RetryContext = @{ Settings = $script:DefaultSettings; OnRetry = $null }
 
 # Stages that are finished, one way or another. Workers in these are skipped.
 $script:FinalStages = @('Complete', 'ManualReview', 'MailboxTimeout')
@@ -97,6 +114,25 @@ function Get-ErrorStatusCode {
     $code = $ErrorRecord.Exception.Data['StatusCode']
     if ($code) { return [int] $code }
     return 0
+}
+
+# The message for a failed call, saying how many attempts were made when it was retried.
+function Get-FailureMessage {
+    param($ErrorRecord)
+    $attempts = [int] $ErrorRecord.Exception.Data['Attempts']
+    if ($attempts -gt 1) { return '{0} (gave up after {1} attempts)' -f $ErrorRecord.Exception.Message, $attempts }
+    $ErrorRecord.Exception.Message
+}
+
+# Makes one call to an external service, retrying transient failures (429,
+# 502, 503, 504) with exponential back-off, using the run's retry settings.
+function Invoke-ServiceCall {
+    param([string] $Description, [scriptblock] $Action)
+
+    $settings = $script:RetryContext.Settings
+    Invoke-WithRetry -Action $Action -Description $Description -OnRetry $script:RetryContext.OnRetry `
+        -MaxAttempts $settings.RetryMaxAttempts -BaseDelaySeconds $settings.RetryBaseDelaySeconds `
+        -MaxDelaySeconds $settings.RetryMaxDelaySeconds
 }
 
 # Turns a timestamp from the state file back into a DateTime. PowerShell 7
@@ -140,7 +176,8 @@ function ConvertFrom-MgUser {
 
 # Reads every Entra identity, with their managers.
 function Get-EntraIdentity {
-    @(Get-MgUser -All -ExpandProperty manager | ForEach-Object { ConvertFrom-MgUser $_ })
+    $users = Invoke-ServiceCall 'Get-MgUser -All' { @(Get-MgUser -All -ExpandProperty manager) }
+    @($users | ForEach-Object { ConvertFrom-MgUser $_ })
 }
 
 # Finds the object ID of the one Entra user with this employeeId, or $null
@@ -148,7 +185,7 @@ function Get-EntraIdentity {
 function Find-ManagerObjectId {
     param([string] $EmployeeId)
     if (-not $EmployeeId) { return $null }
-    $found = @(Get-MgUser -Filter "employeeId eq '$EmployeeId'")
+    $found = @(Invoke-ServiceCall "Get-MgUser $EmployeeId" { Get-MgUser -Filter "employeeId eq '$EmployeeId'" })
     if ($found.Count -eq 1) { return $found[0].Id }
     return $null
 }
@@ -162,7 +199,9 @@ function Set-ManagerByEmployeeId {
     if (-not $managerObjectId) {
         return "manager $ManagerEmployeeId not set: there is not exactly one Entra identity with that employeeId"
     }
-    Set-MgUserManagerByRef -UserId $UserId -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$managerObjectId" }
+    Invoke-ServiceCall "Set-MgUserManagerByRef $ManagerEmployeeId" {
+        Set-MgUserManagerByRef -UserId $UserId -BodyParameter @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$managerObjectId" }
+    }
 }
 
 # Builds the result returned for one change or one worker's pipeline.
@@ -290,14 +329,14 @@ function Invoke-IdentityChange {
     $result   = @{ EmployeeId = $Decision.EmployeeId; Name = $Decision.Name; Stage = $Decision.Action }
     try {
         if ($Decision.Action -eq 'Disable') {
-            Update-MgUser -UserId $identity.id -AccountEnabled:$false
+            Invoke-ServiceCall "Update-MgUser $($Decision.EmployeeId)" { Update-MgUser -UserId $identity.id -AccountEnabled:$false }
             return New-StepResult @result -Outcome 'Done' -Reason 'Account disabled'
         }
 
         # Update: department and manager are the only attributes an Update changes.
         $notes = @()
         if ($Decision.Changes.Contains('department')) {
-            Update-MgUser -UserId $identity.id -Department $Decision.Changes['department'].To
+            Invoke-ServiceCall "Update-MgUser $($Decision.EmployeeId)" { Update-MgUser -UserId $identity.id -Department $Decision.Changes['department'].To }
         }
         if ($Decision.Changes.Contains('managerEmployeeId')) {
             $note = Set-ManagerByEmployeeId -UserId $identity.id -ManagerEmployeeId $Decision.Changes['managerEmployeeId'].To
@@ -309,7 +348,7 @@ function Invoke-IdentityChange {
     }
     catch {
         # Nothing is saved for changes: the next run re-plans and tries again.
-        return New-StepResult @result -Outcome 'Failed' -Reason "Will be retried on the next run: $($_.Exception.Message)"
+        return New-StepResult @result -Outcome 'Failed' -Reason "Will be retried on the next run: $(Get-FailureMessage $_)"
     }
 }
 #endregion
@@ -339,8 +378,29 @@ function Invoke-WorkerPipeline {
     # Stage 1: the Entra identity.
     if (-not $Entry.entraObjectId) {
         try {
-            # Always look first, so a lost state file never leads to a duplicate.
-            $existing = @(Get-MgUser -Filter "employeeId eq '$employeeId'")
+            # Look, then create only if nothing was found. Both happen inside one
+            # retried call, so every attempt looks first: if a create reached
+            # Entra but its response was lost, the retry finds that identity
+            # instead of making a duplicate. This is also what stops a lost
+            # state file from causing a duplicate.
+            $firstName = Get-Value $worker 'firstName'
+            $lastName  = Get-Value $worker 'lastName'
+            $outcome = Invoke-ServiceCall "Get-MgUser / New-MgUser $employeeId" {
+                $found = @(Get-MgUser -Filter "employeeId eq '$employeeId'")
+                if ($found.Count -gt 0 -or $Decision.Action -ne 'Create') {
+                    return [pscustomobject]@{ Existing = $found; Created = $null }
+                }
+                $newUser = New-MgUser -AccountEnabled `
+                    -DisplayName "$firstName $lastName" -GivenName $firstName -Surname $lastName `
+                    -Department (Get-Value $worker 'department') -EmployeeId $employeeId `
+                    -MailNickname ("$firstName.$lastName".ToLowerInvariant() -replace '[^a-z0-9.]', '') `
+                    -UserPrincipalName "$employeeId@$($Settings.UpnDomain)" `
+                    -PasswordProfile @{ Password = (New-RandomPassword); ForceChangePasswordNextSignIn = $true }
+                [pscustomobject]@{ Existing = @(); Created = $newUser }
+            }
+            $existing = @($outcome.Existing)
+            $user     = $outcome.Created
+
             if ($existing.Count -gt 1) {
                 Set-EntryStage $Entry 'ManualReview' "$($existing.Count) Entra identities have employeeId $employeeId" $Now $OnChange
                 return New-StepResult $employeeId $name 'ManualReview' 'Stopped' $Entry.lastError
@@ -351,15 +411,7 @@ function Invoke-WorkerPipeline {
                 $Entry.entraObjectId   = $existing[0].Id
                 $Entry.identityReadyAt = $Now.ToString('o')
             }
-            elseif ($Decision.Action -eq 'Create') {
-                $firstName = Get-Value $worker 'firstName'
-                $lastName  = Get-Value $worker 'lastName'
-                $user = New-MgUser -AccountEnabled `
-                    -DisplayName "$firstName $lastName" -GivenName $firstName -Surname $lastName `
-                    -Department (Get-Value $worker 'department') -EmployeeId $employeeId `
-                    -MailNickname ("$firstName.$lastName".ToLowerInvariant() -replace '[^a-z0-9.]', '') `
-                    -UserPrincipalName "$employeeId@$($Settings.UpnDomain)" `
-                    -PasswordProfile @{ Password = (New-RandomPassword); ForceChangePasswordNextSignIn = $true }
+            elseif ($user) {
                 $Entry.entraObjectId   = $user.Id
                 $Entry.identityReadyAt = $Now.ToString('o')
 
@@ -370,7 +422,7 @@ function Invoke-WorkerPipeline {
                 $managerId = Get-Value $worker 'managerEmployeeId'
                 if ($managerId) {
                     try { $note = Set-ManagerByEmployeeId -UserId $user.Id -ManagerEmployeeId $managerId }
-                    catch { $note = "manager $managerId not set: $($_.Exception.Message)" }
+                    catch { $note = "manager $managerId not set: $(Get-FailureMessage $_)" }
                 }
             }
             else {
@@ -382,7 +434,7 @@ function Invoke-WorkerPipeline {
         }
         catch {
             # The identity may or may not exist; the next run looks it up again first.
-            Set-EntryStage $Entry 'IdentityFailed' $_.Exception.Message $Now $OnChange
+            Set-EntryStage $Entry 'IdentityFailed' (Get-FailureMessage $_) $Now $OnChange
             return New-StepResult $employeeId $name 'IdentityFailed' 'Failed' "Will be retried on the next run: $($Entry.lastError)"
         }
     }
@@ -394,12 +446,13 @@ function Invoke-WorkerPipeline {
         for ($check = 1; $check -le $Settings.MaxMailboxChecksPerRun; $check++) {
             $Entry.mailboxChecks = [int] $Entry.mailboxChecks + 1
             try {
-                $mailbox = Get-EXOMailbox -Identity $Entry.entraObjectId
+                # Transient failures are retried inside the call; a 404 (not provisioned yet) is not.
+                $mailbox = Invoke-ServiceCall "Get-EXOMailbox $employeeId" { Get-EXOMailbox -Identity $Entry.entraObjectId }
                 break
             }
             catch {
                 # 404 means not provisioned yet; anything else is kept as the reason.
-                if ((Get-ErrorStatusCode $_) -ne 404) { $lastError = $_.Exception.Message }
+                if ((Get-ErrorStatusCode $_) -ne 404) { $lastError = Get-FailureMessage $_ }
                 if ($check -lt $Settings.MaxMailboxChecksPerRun -and $Settings.MailboxCheckDelaySeconds -gt 0) {
                     Start-Sleep -Seconds $Settings.MailboxCheckDelaySeconds
                 }
@@ -430,7 +483,10 @@ function Invoke-WorkerPipeline {
     if ($Entry.stage -in 'MailboxReady', 'WriteBackFailed') {
         $address = $Entry.primarySmtpAddress
         try {
-            $result = Set-HRISWorkerEmail -EmployeeId $employeeId -Email $address -IdempotencyKey "$employeeId`:$address" -Token $HRISToken
+            # The idempotency key makes retrying this write safe: a repeat is never applied twice.
+            $result = Invoke-ServiceCall "Set-HRISWorkerEmail $employeeId" {
+                Set-HRISWorkerEmail -EmployeeId $employeeId -Email $address -IdempotencyKey "$employeeId`:$address" -Token $HRISToken
+            }
             $Entry.writeBackResult = $result.Result
             Set-EntryStage $Entry 'Complete' $null $Now $OnChange
 
@@ -444,7 +500,7 @@ function Invoke-WorkerPipeline {
                 return New-StepResult $employeeId $name 'ManualReview' 'Stopped' "Exchange assigned $address, but $($Entry.lastError)"
             }
             # Only this stage is retried next run: the identity and mailbox are already done.
-            Set-EntryStage $Entry 'WriteBackFailed' $_.Exception.Message $Now $OnChange
+            Set-EntryStage $Entry 'WriteBackFailed' (Get-FailureMessage $_) $Now $OnChange
             return New-StepResult $employeeId $name 'WriteBackFailed' 'Failed' "Only the write-back will be retried on the next run: $($Entry.lastError)"
         }
     }
@@ -486,6 +542,9 @@ function Invoke-IdentitySyncRun {
     .PARAMETER OnDecision
         Run with each decision, its position and the total, before anything
         is done for that worker, so the caller can print it.
+    .PARAMETER OnRetry
+        Run before each wait when a call is retried, with details of the
+        retry (see Invoke-WithRetry), so the caller can show it.
     .PARAMETER OnWorkerDone
         Run with each decision, its change result and its stage result (either
         can be $null) once everything for that worker is done.
@@ -503,8 +562,12 @@ function Invoke-IdentitySyncRun {
         [hashtable] $Settings = (Get-SyncSettings),
         [scriptblock] $OnChange,
         [scriptblock] $OnDecision,
-        [scriptblock] $OnWorkerDone
+        [scriptblock] $OnWorkerDone,
+        [scriptblock] $OnRetry
     )
+
+    # Every call to Graph, Exchange and the HRIS in this run uses these retry settings.
+    $script:RetryContext = @{ Settings = $Settings; OnRetry = $OnRetry }
 
     $identities = Get-EntraIdentity
     $decisions  = @(Get-IdentityPlan -Workers $Workers -Identities $identities -Today $Today)

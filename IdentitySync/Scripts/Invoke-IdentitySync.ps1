@@ -37,6 +37,7 @@
     The work is done by the modules in IdentitySync\Modules:
       IdentitySync.psm1           the validation and decision rules
       IdentitySync.Pipeline.psm1  applying decisions, stages and sync state
+      IdentitySync.Retry.psm1     retrying 429/502/503/504 with back-off
       IdentitySync.Mocks.psm1     the mock Graph, Exchange and HRIS services
       IdentitySync.Files.psm1     reading and writing JSON files
       IdentitySync.Display.psm1   everything printed to the terminal
@@ -102,7 +103,7 @@ $ErrorActionPreference = 'Stop'
 # In production, IdentitySync.Mocks.psm1 is replaced by the real modules:
 # Microsoft.Graph.Users, ExchangeOnlineManagement and an HRIS API client.
 $modules = Join-Path $PSScriptRoot '..\Modules'
-foreach ($module in 'IdentitySync.psm1', 'IdentitySync.Files.psm1', 'IdentitySync.Mocks.psm1',
+foreach ($module in 'IdentitySync.psm1', 'IdentitySync.Files.psm1', 'IdentitySync.Retry.psm1', 'IdentitySync.Mocks.psm1',
                     'IdentitySync.Pipeline.psm1', 'IdentitySync.Display.psm1') {
     Import-Module (Join-Path $modules $module) -Force
 }
@@ -160,11 +161,20 @@ $showOutcome = {
     param($Decision, $Change, $Stages)
     Write-WorkerOutcome -Decision $Decision -Change $Change -Stages $Stages
 }
+$showRetry = {
+    param($Retry)
+    Write-RetryNotice -Retry $Retry
+}
+
+# Retry waits: the real services would use the default (2, 4, 8 seconds).
+# The mocks answer instantly, so shorter waits keep a run quick while still
+# showing the back-off (0.5, 1, 2 seconds).
+$settings = Get-SyncSettings -Override @{ RetryBaseDelaySeconds = 0.5 }
 
 try {
     $run = Invoke-IdentitySyncRun -Workers $workers -State $state -Apply:$Apply -Today $Today `
-        -HRISToken $hrisToken -OnChange $(if ($Apply) { $saveAll } else { $null }) `
-        -OnDecision $showDecision -OnWorkerDone $(if ($Apply) { $showOutcome } else { $null })
+        -HRISToken $hrisToken -Settings $settings -OnChange $(if ($Apply) { $saveAll } else { $null }) `
+        -OnDecision $showDecision -OnWorkerDone $(if ($Apply) { $showOutcome } else { $null }) -OnRetry $showRetry
 }
 finally {
     Set-MockActivityOutput -Enabled $true -Indent 0
